@@ -1,3 +1,8 @@
+'''
+Created on Dec 2, 2014
+
+@author: SriDev
+'''
 import argparse
 import os
 import sys
@@ -6,8 +11,9 @@ import subprocess
 import json
 import datetime
 import time
-
-from PIL import Image
+import platform
+import ctypes
+import Image
 
 
 # Current script's directory used to store captures
@@ -48,7 +54,7 @@ def find_program(program):
 
 def capture_test_image(args):
     """Performs guessing of the operating system/tools and forwards the call"""
-    uname = os.uname()[0].lower()
+    uname = platform.uname()[0].lower()
     if uname == 'darwin':
         return darwin_capture_test_image(args)
     elif uname == 'windows':
@@ -85,22 +91,33 @@ def linux_capture_test_image(args):
 
 
 def windows_capture_test_image(args):
-    raise NotImplementedError, "Windows support is not available yet"
-
+    width = 100
+    height = 75
+    os.system("CommandCam /filename %s" % CURRENT_CAPTURE)
+    im1 = Image.open(CURRENT_CAPTURE)
+    im2 = im1.resize((width, height), Image.ANTIALIAS)
+    im2.save("current.jpg") 
+    im = Image.open(CURRENT_CAPTURE)
+    buffer = im.load()
+    return im, buffer
 
 def save_image(args, width, height, diskSpaceToReserve):
     """Save a full size image to disk"""
     keep_disk_space_free(args.diskSpaceToReserve)
     time = datetime.datetime.now()
-    filename = "%s/capture-%04d%02d%02d-%02d%02d%02d.jpg" % (
-        WORKING_DIR, time.year, time.month, time.day, time.hour, time.minute, time.second)
-
-    uname = os.uname()[0].lower()
+    filename = "capture-%04d%02d%02d-%02d%02d%02d.jpg" % (
+        time.year, time.month, time.day, time.hour, time.minute, time.second)
+    filenam=os.path.join(WORKING_DIR,filename)
+    print filename
+    uname = platform.uname()[0].lower()
     if uname == 'darwin':
         os.system("cp %s %s" % (CURRENT_CAPTURE, filename))
         log("Captured %s" % filename)
     elif uname == 'windows':
-        raise NotImplementedError, "Windows support is not available yet"
+        os.system("copy %s %s" % (CURRENT_CAPTURE, filenam))
+        #os.system("copy %s cop.jpg" % CURRENT_CAPTURE)
+        #os.system("copy current.jpg cop.jpg")
+        log("Captured %s" % filename)
     else:
         raspistill = find_program("raspistill")
         if raspistill:
@@ -124,9 +141,19 @@ def keep_disk_space_free(bytesToReserve):
 
 def get_free_space():
     """Get available disk space"""
-    st = os.statvfs(WORKING_DIR)
-    du = st.f_bavail * st.f_frsize
-    return du
+    uname = platform.uname()[0].lower()
+    if uname == 'darwin':
+     st = os.statvfs(WORKING_DIR)
+     du = st.f_bavail * st.f_frsize
+     return du
+    elif uname == 'windows':
+        free_bytes = ctypes.c_ulonglong(0)
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(u'c:\\'), None, None, ctypes.pointer(free_bytes))
+        return free_bytes.value
+    else:
+        st = os.statvfs(WORKING_DIR)
+        du = st.f_bavail * st.f_frsize
+        return du
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -161,7 +188,7 @@ def main():
     parser.add_argument('--sensitivity',
                         dest='sensitivity',
                         action='store',
-                        default=20,
+                        default=500,
                         help='how many changed pixels before capturing an image')
     parser.add_argument('--forceCapture',
                         dest='forceCapture',
@@ -228,13 +255,13 @@ def main():
             (changedPixels, args.sensitivity))
         if changedPixels > args.sensitivity:
             lastCapture = time.time()
+            args.saveSnapshots = True
             if args.saveSnapshots:
                 save_image(
-                    args, saveWidth, saveHeight, args.diskSpaceToReserve)
+                    args, args.saveWidth, args.saveHeight, args.diskSpaceToReserve)
             out(DateTimeEncoder().encode(
                 dict(movement=True, measured=datetime.datetime.now())))
-            sys.stdout.flush()
-
+            args.saveSnapshots = False
         # Swap comparison buffers
         image1 = image2
         buffer1 = buffer2
